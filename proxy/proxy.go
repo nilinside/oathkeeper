@@ -57,6 +57,7 @@ const (
 	director key = iota + 1
 	ContextKeyMatchedRule
 	ContextKeySession
+	ContextKeyGuardianResponse
 )
 
 func (d *Proxy) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -73,6 +74,8 @@ func (d *Proxy) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 
 	rl, _ := r.Context().Value(ContextKeyMatchedRule).(*rule.Rule)
+
+	gr, _ := r.Context().Value(ContextKeyGuardianResponse).(*http.Response)
 
 	if err, ok := r.Context().Value(director).(error); ok && err != nil {
 		d.r.Logger().WithError(err).
@@ -103,6 +106,14 @@ func (d *Proxy) RoundTrip(r *http.Request) (*http.Response, error) {
 				Warn("Access request granted")
 		}
 
+		if gr.StatusCode != http.StatusOK {
+			return &http.Response{
+				StatusCode: gr.StatusCode,
+				Body:       ioutil.NopCloser(gr.Body),
+				Header:     gr.Header,
+			}, nil
+		}
+
 		return res, err
 	}
 
@@ -131,12 +142,15 @@ func (d *Proxy) Director(r *http.Request) {
 	}
 
 	*r = *r.WithContext(context.WithValue(r.Context(), ContextKeyMatchedRule, rl))
-	s, err := d.r.ProxyRequestHandler().HandleRequest(r, rl)
+	rh := d.r.ProxyRequestHandler()
+	s, err := rh.HandleRequest(r, rl)
 	if err != nil {
 		*r = *r.WithContext(context.WithValue(r.Context(), director, err))
 		return
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), ContextKeySession, s))
+
+	*r = *r.WithContext(context.WithValue(r.Context(), ContextKeyGuardianResponse, rh.gr))
 
 	for h := range s.Header {
 		r.Header.Set(h, s.Header.Get(h))

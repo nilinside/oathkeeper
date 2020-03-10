@@ -22,6 +22,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"github.com/ory/oathkeeper/pipeline/guard"
 	"net/http"
 
 	"github.com/ory/herodot"
@@ -52,8 +53,9 @@ type requestHandlerRegistry interface {
 }
 
 type RequestHandler struct {
-	r requestHandlerRegistry
-	c configuration.Provider
+	r  requestHandlerRegistry
+	c  configuration.Provider
+	gr *http.Response
 }
 
 type whenConfig struct {
@@ -322,6 +324,20 @@ func (d *RequestHandler) HandleRequest(r *http.Request, rl *rule.Rule) (session 
 			return nil, err
 		}
 	}
+
+	// Guard handler
+	guardian := guard.NewGuardianTeapot()
+	resp, err := guardian.Check(r, session, nil, rl)
+	if err != nil {
+		d.r.Logger().WithError(err).
+			WithFields(fields).
+			WithField("granted", false).
+			//WithField("mutation_handler", m.Handler).
+			WithField("reason_id", "guardian_handler_error").
+			Warn("The guardian handler encountered an error")
+		return nil, err
+	}
+	d.gr = resp
 
 	return session, nil
 }
